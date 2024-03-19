@@ -1,0 +1,897 @@
+﻿Program.Sub.ScreenSU.Start
+Gui.Form..Create(BaseForm)
+Gui.Form..Caption("Mass Update Tax Code (6934)")
+Gui.Form..Size(7200,2205)
+Gui.Form..MinX(0)
+Gui.Form..MinY(0)
+Gui.Form..Position(0,0)
+Gui.Form..AlwaysOnTop(False)
+Gui.Form..FontName("Tahoma")
+Gui.Form..FontSize(8.25)
+Gui.Form..ControlBox(True)
+Gui.Form..MaxButton(True)
+Gui.Form..MinButton(True)
+Gui.Form..MousePointer(0)
+Gui.Form..Moveable(True)
+Gui.Form..Sizeable(True)
+Gui.Form..ShowInTaskBar(True)
+Gui.Form..TitleBar(True)
+Gui.Form.lblTitle1.Create(Label,"Updating...",True,930,240,0,255,105,True,0,"Tahoma",10,,0,0)
+Gui.Form.lblTitle1.BorderStyle(0)
+Gui.Form.prgBar.Create(ProgressBar)
+Gui.Form.prgBar.Visible(True)
+Gui.Form.prgBar.Size(6600,420)
+Gui.Form.prgBar.Position(225,915)
+Gui.Form.lblTitle2.Create(Label,"...",True,180,240,0,270,480,True,0,"Tahoma",10,,0,0)
+Gui.Form.lblTitle2.BorderStyle(0)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+'Program.External.Include.Library("UPLPUROR_TAX.lib")
+V.Global.sErrorLog.Declare(String, "")
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'This project was created for Miller Industries. We are going to be creating/updating OrderLines from an excel spreadsheet.
+'The proeject will begin by requesting they select an excel sheet, then it will parse the file and use that information to create POs
+'Created by FEQ on 12/10/2019
+
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.sSQL.Declare
+V.Local.sFile.Declare
+V.Local.sSource.Declare
+V.Local.sTarget.Declare
+
+F.ODBC.Connection!conx.OpenCompanyConnection(3000)
+
+'Backup PO and SO files
+F.Intrinsic.String.Build("{0}\PENTY{1}",V.Caller.FilesDir,V.Caller.CompanyCode,V.Local.sSource)
+F.Intrinsic.String.Build("{0}\PENTY{1}{2}{3}",V.Caller.FilesDir, V.Caller.CompanyCode, V.Ambient.Date.FormatMMDDYYYY,V.Ambient.Time.FormatHHMMSS, V.Local.sTarget)
+F.Intrinsic.File.CopyOpenFile(V.Local.sSource,V.Local.sTarget)
+
+F.Intrinsic.String.Build("{0}\OENTY{1}",V.Caller.FilesDir,V.Caller.CompanyCode,V.Local.sSource)
+F.Intrinsic.String.Build("{0}\OENTY{1}{2}{3}",V.Caller.FilesDir, V.Caller.CompanyCode, V.Ambient.Date.FormatMMDDYYYY,V.Ambient.Time.FormatHHMMSS, V.Local.sTarget)
+F.Intrinsic.File.CopyOpenFile(V.Local.sSource,V.Local.sTarget)
+
+'Update PO Tax
+F.Intrinsic.Control.CallSub(UpdatePOHeader)
+F.Intrinsic.Control.CallSub(UpdatePOLine)
+
+'Update SO Tax
+F.Intrinsic.Control.CallSub(UpdateSOHeader)
+F.Intrinsic.Control.CallSub(UpdateSOLine)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.Unload.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.sExttn.Declare(String, "")
+V.Local.sFileN.Declare(String, "")
+
+'We are going to save the error log if we have anything in there.
+F.Intrinsic.Control.If(V.Global.sErrorLog.Trim, <>, "")
+	F.Intrinsic.String.Format(V.Ambient.Now, "YYMMDD", V.Local.sExttn)
+	F.Intrinsic.String.Build("{0}\{1}POERRORS{2}", V.Caller.FilesDir, V.Caller.CompanyCode, V.Local.sExttn, V.Local.sFileN)
+	F.Intrinsic.File.String2File(V.Local.sFileN, V.Global.sErrorLog)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.UI.CloseWaitDialog
+F.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry
+Program.Sub.Unload.End
+
+Program.Sub.UpdatePOHeader.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.sPONum.Declare(String, "")
+V.Local.sActCd.Declare(String, "")
+V.Local.sWONum.Declare(String, "")
+V.Local.sWOSeq.Declare(String, "")
+V.Local.sDueDt.Declare(String, "")
+V.Local.sOrdDt.Declare(String, "")
+V.Local.sNowDt.Declare(String, "")
+V.Local.sVndCd.Declare(String, "")
+V.Local.sVndNm.Declare(String, "")
+V.Local.sAddy1.Declare(String, "")
+V.Local.sAddy2.Declare(String, "")
+V.Local.sCity1.Declare(String, "")
+V.Local.sState.Declare(String, "")
+V.Local.sZipCD.Declare(String, "")
+V.Local.sAttnt.Declare(String, "")
+V.Local.sCntry.Declare(String, "")
+V.Local.sQuery.Declare(String, "")
+V.Local.sOrdLn.Declare(String, "")
+V.Local.sPrtNo.Declare(String, "")
+V.Local.sPtDsc.Declare(String, "")
+V.Local.sPtCst.Declare(String, "")
+V.Local.sQuant.Declare(String, "")
+V.Local.sWOSuf.Declare(String, "")
+V.Local.sXTAmt.Declare(String, "")
+V.Local.sPrtUM.Declare(String, "")
+V.Local.sGLAct.Declare(String, "")
+V.Local.iDrcla.Declare(Long, 0)
+V.Local.iOrdLn.Declare(Long, 0)
+V.Local.bOrdCk.Declare(Boolean, True)
+V.Local.sSQL.Declare
+V.Local.sOrderTax.Declare
+V.Local.iVAT.Declare
+V.Local.sVAT.Declare
+V.Local.sFile.Declare
+V.Local.sMsg.Declare
+
+F.Data.DataTable.CreateFromSQL("dtPOHeader",conx,"Select Vendor From PO_Header Where Rec_Type = 'A' group by Vendor")
+'f.Intrinsic.String.Build("{0}\GAB_6934_PO_HEADER_{1}.xml",v.Caller.GasDir,v.Caller.CompanyCode,v.Local.sFile)
+'F.Data.DataTable.SaveToXML("dtPOHeader",0,True,V.Local.sFile)
+
+'Get tax code for all vendors
+Gui.Form..Show
+Gui.Form.prgBar.Min(0)
+Gui.Form.prgBar.Max(V.DataTable.dtPOHeader.RowCount)
+Gui.Form.lblTitle1.Caption("Updating PO Header...")
+F.Intrinsic.Control.For(V.Local.iDrcla, 0, V.DataTable.dtPOHeader.RowCount--, 1)
+	F.Intrinsic.String.Build("Vendor #{0}", V.DataTable.dtPOHeader(V.Local.iDrcla).VENDOR!FieldValTrim, V.Local.sMsg)
+	Gui.Form.lblTitle2.Caption(V.Local.sMsg)
+	Gui.Form.prgBar.Value(V.Local.iDrcla)
+	F.ODBC.Connection!conx.OpenLocalRecordsetRO("rst","Select * From V_OP_Header where ID = '400078'")
+	F.Intrinsic.Control.If(V.ODBC.conx!rst.FieldVal!F_Boolean,=,1)
+		V.Local.iVAT.Set(1)
+		F.Intrinsic.String.Build("select Dflt_Tax_Grp_Code as TaxCode from V_VAT_VEND_TAX Where Vendor_ID = '{0}'",V.DataTable.dtPOHeader(V.Local.iDrcla).VENDOR!FieldValTrim, V.Local.sSQL)	
+	F.Intrinsic.Control.Else
+		V.Local.iVAT.Set(0)
+		F.Intrinsic.String.Build("select Tax_Code as TaxCode from V_VENDOR_ADDL Where Vendor = '{0}'",V.DataTable.dtPOHeader(V.Local.iDrcla).VENDOR!FieldValTrim, V.Local.sSQL)
+	F.Intrinsic.Control.EndIf
+	F.ODBC.conx!rst.Close
+	F.ODBC.Connection!conx.OpenLocalRecordsetRO("rst",V.Local.sSQL)
+	F.Intrinsic.Control.If(V.ODBC.conx!rst.EOF,=,True)
+		V.Local.sOrderTax.Set("")
+	F.Intrinsic.Control.Else
+		V.Local.sOrderTax.Set(V.ODBC.conx!rst.FieldValTrim!TaxCode)
+	F.Intrinsic.Control.EndIf
+	F.ODBC.conx!rst.Close
+	
+	F.Intrinsic.String.Build("update PO_Header set Tax_Code = '{0}' where Vendor = '{1}' and Flag_Recv_Closed <> 'Y' and Rec_Type = 'A' ",V.Local.sOrderTax.Trim, V.DataTable.dtPOHeader(V.Local.iDrcla).Vendor!FieldValTrim, V.Local.sSQL)
+	F.ODBC.Connection!conx.Execute(V.Local.sSQL)
+	
+F.Intrinsic.Control.Next(V.Local.iDrcla)
+F.Data.DataTable.Close("dtPOHeader")
+'Now we fill the order lines.
+F.Intrinsic.UI.ChangeWaitStatus("Processing Lines")
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.UpdatePOHeader.End
+
+Program.Sub.UpdatePOLine.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.sFileN.Declare(String, "")
+V.Local.sXLDat.Declare(String, "")
+V.Local.sLines.Declare(String, "")
+V.Local.sCntnt.Declare(String, "")
+V.Local.sTitls.Declare(String, "")
+V.Local.sTypes.Declare(String, "")
+V.Local.sPONum.Declare(String, "")
+V.Local.sQuery.Declare(String, "")
+V.Local.sCheck.Declare(String, "")
+V.Local.sPOErr.Declare(String, "")
+V.Local.sParam.Declare(String, "")
+V.Local.iNumbr.Declare(Long, 0)
+V.Local.sSQL.Declare
+v.Local.sFile.Declare
+V.Local.sARecords.Declare(String)
+V.Local.sBCRecords.Declare(String)
+V.Local.sLRecords.Declare(String)
+V.Local.sAllRecords.Declare(String)
+V.Local.sFilePath.Declare(String)
+V.Local.sRet.Declare(String)
+V.Local.iCount.Declare(Long)
+V.Local.sMsg.Declare
+
+'Set file
+F.Intrinsic.String.Build("{0}\PUORD{1}.TXT",V.Caller.FilesDir,V.Caller.CompanyCode,V.Local.sFilePath)
+
+F.Data.DataTable.CreateFromSQL("UPLPURORL",conx,"Select PL.VENDOR, PL.PURCHASE_ORDER as PONum, PL.RECORD_NO as RecType, PART as PartNum, LOCATION as PartLoc, DESCRIPTION as PartDesc, UM_PURCHASING as POUM, FLAG_ACCT_CLOSED as AcctClosed, PL.JOB as WONum, PL.SEQUENCE as WOSeq, PL.REQUISITION_NO as ReqNum, PL.DEPARTMENT as Dept, TAX_STATUS as TaxStatus, CODE_ITEM_SORT as SortCode, GL_ACCOUNT_LINE as GLAcct, BIN as InvBin, PRODUCT_LINE as PL, ' ' as FILLER, DATE_DUE_LINE as DueDate, Ltrim(Rtrim(DATE_LAST_RECEIVED)) as LastReceiptDate, convert(COST, sql_char) as PurchCost, convert(DISCOUNT, sql_char) as Discount, convert(QTY_ORDER, sql_char) as PurchQtyOrdered, convert(QTY_RECEIVED, sql_char) as PurchQtyReceived, convert(QTY_REJECT, sql_char) as PurchQtyRejected, convert(EXTENSION, sql_char) as ExtAmount, convert(QTY_RECV_ALT, sql_char) as InvQtyReceived, FLAG_RECV_CLOSE as ClosePOLine, FLAG_CONT_DESC as ContinueDescription, convert(QTY_RECD_NOT_INSP, sql_char) as RcvdQtyNotInspected, PL.SUFFIX as WOSuffix, PART_MFG_NO as MfgPartNum, MFG_NAME as MfgName, convert(QTY_ALT_ORDER, sql_char) as InvQtyOrdered, UM_INVENTORY as InvUM, '      ' as FILLER1, EXCHANGE_CURR as ExchCurr, convert(EXCHANGE_EXT, sql_char) as ExchExt, PL.USER_1 as User1, PL.USER_2 as User2, PL.USER_3 as User3, PL.USER_4 as User4, PL.USER_5 as User5, DATE_EXCHANGE as ExchDate, convert(EXCHANGE_COST2, sql_char) as ExchCost, convert(EXCHANGE_RATE, sql_char) as ExchRate, convert(REQUISITION_LINE, sql_char) as ReqLineNum, REQUIRES_INSP as InspectionFlag, ORIG_DUE_DATE as OrigDueDate, SHIP_DATE_L as LineShipDate, convert(SHIPPED_QTY, sql_char) as ShippedQty, COST_SOURCE, REQ_TESTING, OVERRIDE_CONV, convert(INV_COST, sql_char) as InvCost, PACK_LST_PRNT, GL_MANUAL_ENTER, RECV_TO_JOB, convert(ROLL_QTY, sql_char) as RollQty, convert(' ', sql_char) as TaxCode, PL.VAT_RULE as VatRule, IF(PL.BOOK_USE_TAX=0,'N','Y') AS BOOK_TAX, FA_ID as FixedAsset, BLANKET_PO as BlanketPONum, BLANKET_PO_LINE as BlanketPOLine, (QTY_ORDER-QTY_RECEIVED-QTY_REJECT) AS QTY_OPEN From PO_Lines PL Left Join V_PO_Header PH On PL.Purchase_Order = PH.Purchase_Order Where Flag_Rec_Type = 'L' and PH.Flag_Recv_Closed <> 'Y' And PL.FLAG_RECV_CLOSE <> 'Y' And QTY_OPEN <> 0;")
+
+'Create Dictionary for TaxCode
+F.ODBC.Connection!conx.OpenLocalRecordsetRO("rst","Select * From V_OP_Header where ID = '400078'")
+F.Intrinsic.Control.If(V.ODBC.conx!rst.FieldVal!F_Boolean,=,1)
+	V.Local.sSQL.Set("select Vendor_ID, convert(Dflt_Tax_Grp_Code, sql_char) from VAT_VEND_TAX")	
+F.Intrinsic.Control.Else
+	V.Local.sSQL.Set("select Vendor, Tax_Code from VENDOR_ADDL")
+F.Intrinsic.Control.EndIf
+F.ODBC.conx!rst.Close
+f.Data.Dictionary.CreateFromSQL("dic","conx",V.Local.sSQL,0)
+f.Data.Dictionary.SetDefaultReturn("dic","")
+f.Data.DataTable.FillFromDictionary("UPLPURORL","dic","VENDOR","TaxCode")
+F.Data.DataTable.RemoveColumn("UPLPURORL","VENDOR")
+F.Data.DataTable.RemoveColumn("UPLPURORL","Qty_Open")
+F.Data.Dictionary.Close("dic")
+
+f.Intrinsic.String.Build("{0}\GAB_6934_PO_LINES_{1}.xml",v.Caller.GasDir, v.Caller.CompanyCode, v.Local.sFile)
+F.Data.DataTable.SaveToXML("UPLPURORL",0,True,V.Local.sFile)
+F.Intrinsic.UI.ChangeWaitStatus("Creating Purchase Order")
+F.Intrinsic.Control.If(V.DataTable.UPLPURORL.RowCount, >, 0)
+	Gui.Form.prgBar.Min(0)
+	Gui.Form.prgBar.Max(V.DataTable.UPLPURORL.RowCount)
+	Gui.Form.lblTitle1.Caption("Preparing PO lines data...")
+	'Format values in each row as needed by file format
+	F.Intrinsic.Control.For(V.Local.iCount,0,V.DataTable.UPLPURORL.RowCount--,1)
+		F.Intrinsic.String.Build("PO #{0}", V.DataTable.UPLPURORL(V.Local.iCount).PONum!FieldVal, V.Local.sMsg)
+		Gui.Form.lblTitle2.Caption(V.Local.sMsg)
+		Gui.Form.prgBar.Value(V.Local.iCount)	
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PONum!FieldVal," ",7,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PONum",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).RecType!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"RecType",V.Local.sRet)
+	
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PartNum!FieldVal," ",20,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PartNum",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PartLoc!FieldVal," ",2,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PartLoc",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PartDesc!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PartDesc",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).POUM!FieldVal," ",2,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"POUM",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).AcctClosed!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"AcctClosed",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).WONum!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"WONum",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).WOSeq!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"WOSeq",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ReqNum!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ReqNum",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).Dept!FieldVal," ",4,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"Dept",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).TaxStatus!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"TaxStatus",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).SortCode!FieldVal," ",12,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"SortCode",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).GLAcct!FieldVal," ",15,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"GLAcct",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).InvBin!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"InvBin",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PL!FieldVal," ",2,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PL",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).DueDate!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"DueDate",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).LastReceiptDate!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"LastReceiptDate",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PurchCost!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PurchCost",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).Discount!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"Discount",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PurchQtyOrdered!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PurchQtyOrdered",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PurchQtyReceived!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PurchQtyReceived",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PurchQtyRejected!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PurchQtyRejected",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ExtAmount!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ExtAmount",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).InvQtyReceived!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"InvQtyReceived",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ClosePOLine!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ClosePOLine",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ContinueDescription!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ContinueDescription",V.Local.sRet)			
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).RcvdQtyNotInspected!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"RcvdQtyNotInspected",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).WOSuffix!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"WOSuffix",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).MfgPartNum!FieldVal," ",23,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"MfgPartNum",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).MfgName!FieldVal," ",23,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"MfgName",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).InvQtyOrdered!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"InvQtyOrdered",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).InvUM!FieldVal," ",2,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"InvUM",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ExchCurr!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ExchCurr",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ExchExt!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ExchExt",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).User1!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"User1",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).User2!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"User2",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).User3!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"User3",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).User4!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"User4",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).User5!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"User5",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ExchDate!FieldVal," ",8,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ExchDate",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ExchCost!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ExchCost",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ExchRate!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ExchRate",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ReqLineNum!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ReqLineNum",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).InspectionFlag!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"InspectionFlag",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).OrigDueDate!FieldVal," ",8,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"OrigDueDate",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).LineShipDate!FieldVal," ",8,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"LineShipDate",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).ShippedQty!FieldVal," ",19,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"ShippedQty",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).COST_SOURCE!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"COST_SOURCE",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).REQ_TESTING!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"REQ_TESTING",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).OVERRIDE_CONV!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"OVERRIDE_CONV",V.Local.sRet)
+		
+		F.Intrinsic.String.LPad(V.DataTable.UPLPURORL(V.Local.iCount).InvCost!FieldVal," ",19,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"InvCost",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).PACK_LST_PRNT!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"PACK_LST_PRNT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).GL_MANUAL_ENTER!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"GL_MANUAL_ENTER",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).RECV_TO_JOB!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"RECV_TO_JOB",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).RolLQty!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"RolLQty",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).TaxCode!FieldVal," ",5,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"TaxCode",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).VatRule!FieldVal," ",2,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"VatRule",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).FixedAsset!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"FixedAsset",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).BlanketPONum!FieldVal," ",7,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"BlanketPONum",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLPURORL(V.Local.iCount).BlanketPOLine!FieldVal," ",4,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLPURORL",V.Local.iCount,"BlanketPOLine",V.Local.sRet)
+		
+	F.Intrinsic.Control.Next(V.Local.iCount)
+	
+	F.Data.DataView.Create("UPLPURORL","LRecordView",22)
+	F.Data.DataView.ToString("UPLPURORL","LRecordView","",V.Ambient.NewLine,V.Local.sLRecords)
+	F.Data.DataView.Close("UPLPURORL","LRecordView")
+	
+	F.Intrinsic.UI.CloseWaitDialog
+	
+	'Build the individual record-type strings to a single final string 
+	F.Intrinsic.Control.If(V.Local.sARecords,!=,"")
+		V.Local.sAllRecords.Set(V.Local.sARecords)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.If(V.Local.sBCRecords,!=,"")
+		F.Intrinsic.Control.If(V.Local.sAllRecords,=,"")
+			V.Local.sAllRecords.Set(V.Local.sBCRecords)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.String.Build("{0}{1}{2}",V.Local.sAllRecords,V.Ambient.NewLine,V.Local.sBCRecords,V.Local.sAllRecords)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.If(V.Local.sLRecords,!=,"")
+		F.Intrinsic.Control.If(V.Local.sAllRecords,=,"")
+			V.Local.sAllRecords.Set(V.Local.sLRecords)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.String.Build("{0}{1}{2}",V.Local.sAllRecords,V.Ambient.NewLine,V.Local.sLRecords,V.Local.sAllRecords)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+		
+	'Verify at least one record exists, then write final string to file and call the necessary call wrapper
+	F.Intrinsic.Control.If(V.Local.sAllRecords,!=,"")
+		F.Intrinsic.File.String2File(V.Local.sFilePath,V.Local.sAllRecords, 1)
+		Gui.Form.prgBar.Min(0)
+		Gui.Form.prgBar.Max(100)
+		Gui.Form.lblTitle1.Caption("Updating PO Lines...")
+		Gui.Form.lblTitle2.Caption("")
+		F.ODBC.Connection!conx.Execute("Delete From PO_Lines Where Flag_Rec_Type = 'L' and FLAG_RECV_CLOSE <> 'Y' And (QTY_ORDER-QTY_RECEIVED-QTY_REJECT) <> 0")
+		F.Global.General.CallWrapperSync(50,"UPLPUROR/U")
+		Gui.Form.prgBar.Value(100)
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Else
+	'Print some sort of error message	
+	F.Intrinsic.String.Build("PO Creation Error. Order lines in file do not appear to be parsed correctly.{1}", V.Ambient.NewLine, V.Local.sPOErr)
+	F.Intrinsic.UI.Msgbox(V.Local.sPOErr, "ERROR CREATING PO")
+	
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.UpdatePOLine.End
+
+Program.Sub.UpdateSOHeader.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.iDrcla.Declare(Long, 0)
+V.Local.iOrdLn.Declare(Long, 0)
+V.Local.bOrdCk.Declare(Boolean, True)
+V.Local.sSQL.Declare
+V.Local.sTaxZone.Declare
+V.Local.sTaxAuth.Declare
+V.Local.iVAT.Declare
+V.Local.sVAT.Declare
+V.Local.sFile.Declare
+V.Local.sMsg.Declare
+
+F.Data.DataTable.CreateFromSQL("dtSOHeader",conx,"Select Customer, Ship_Id From Order_Header Where Record_Type = 'A' group by customer, Ship_Id")
+
+'Updating tax code for all customers
+Gui.Form.prgBar.Min(0)
+Gui.Form.prgBar.Max(V.DataTable.dtSOHeader.RowCount)
+Gui.Form.lblTitle1.Caption("Updating SO Header...")
+F.Intrinsic.Control.For(V.Local.iDrcla, 0, V.DataTable.dtSOHeader.RowCount--, 1)
+	F.Intrinsic.String.Build("Customer #{0} Ship ID #{1}", V.DataTable.dtSOHeader(V.Local.iDrcla).CUSTOMER!FieldValTrim, V.DataTable.dtSOHeader(V.Local.iDrcla).SHIP_ID!FieldValTrim, V.Local.sMsg)
+	Gui.Form.lblTitle2.Caption(V.Local.sMsg)
+	Gui.Form.prgBar.Value(V.Local.iDrcla)
+	F.Intrinsic.Control.If(V.DataTable.dtSOHeader(V.Local.iDrcla).SHIP_ID!FieldValTrim,=,"")
+		F.Intrinsic.String.Build("select Tax_Zone, TAX_Auth from V_Customer_Tax_Auth Where Cust = '{0}'",V.DataTable.dtSOHeader(V.Local.iDrcla).CUSTOMER!FieldValTrim, V.Local.sSQL)	
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Build("select Ship_Tax_Zone_1 AS Tax_Zone, Ship_Tax_1 as Tax_Auth from V_OE_Multi_Ship Where Customer = '{0}' and Ship_Seq = '{1}' ",V.DataTable.dtSOHeader(V.Local.iDrcla).CUSTOMER!FieldValTrim, V.DataTable.dtSOHeader(V.Local.iDrcla).SHIP_ID!FieldValTrim, V.Local.sSQL)	
+	F.Intrinsic.Control.EndIf
+	F.ODBC.Connection!conx.OpenLocalRecordsetRO("rst",V.Local.sSQL)
+	F.Intrinsic.Control.If(V.ODBC.conx!rst.EOF,=,True)
+		V.Local.sTaxZone.Set("")
+		V.Local.sTaxAuth.Set("")
+	F.Intrinsic.Control.Else
+		V.Local.sTaxZone.Set(V.ODBC.conx!rst.FieldValTrim!Tax_Zone)
+		V.Local.sTaxAuth.Set(V.ODBC.conx!rst.FieldValTrim!Tax_Auth)
+	F.Intrinsic.Control.EndIf
+	F.ODBC.conx!rst.Close
+	
+	F.Intrinsic.String.Build("update Order_Header set Tax_State = '{0}', Tax_1 = '{1}' where customer = '{2}' and ship_id = '{3}' and (Record_Type = 'A' OR Record_Type = 'C') ",V.Local.sTaxZone.Trim, V.Local.sTaxAuth.Trim, V.DataTable.dtSOHeader(V.Local.iDrcla).Customer!FieldValTrim, V.DataTable.dtSOHeader(V.Local.iDrcla).SHIP_ID!FieldValTrim, V.Local.sSQL)
+	F.ODBC.Connection!conx.Execute(V.Local.sSQL)
+	
+F.Intrinsic.Control.Next(V.Local.iDrcla)
+F.Data.DataTable.Close("dtSOHeader")
+'Now we fill the order lines.
+F.Intrinsic.UI.ChangeWaitStatus("Processing SO Lines")
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.UpdateSOHeader.End
+
+Program.Sub.UpdateSOLine.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.sFileN.Declare(String, "")
+V.Local.sXLDat.Declare(String, "")
+V.Local.sLines.Declare(String, "")
+V.Local.sCntnt.Declare(String, "")
+V.Local.sTitls.Declare(String, "")
+V.Local.sTypes.Declare(String, "")
+V.Local.sPONum.Declare(String, "")
+V.Local.sQuery.Declare(String, "")
+V.Local.sCheck.Declare(String, "")
+V.Local.sPOErr.Declare(String, "")
+V.Local.sParam.Declare(String, "")
+V.Local.iNumbr.Declare(Long, 0)
+V.Local.sSQL.Declare
+v.Local.sFile.Declare
+V.Local.sARecords.Declare(String)
+V.Local.sBCRecords.Declare(String)
+V.Local.sLRecords.Declare(String)
+V.Local.sAllRecords.Declare(String)
+V.Local.sFilePath.Declare(String)
+V.Local.sRet.Declare(String)
+V.Local.iCount.Declare(Long)
+V.Local.sMsg.Declare
+
+'Set file
+F.Intrinsic.String.Build("{0}\SALESHDR.TXT",V.Caller.FilesDir,V.Caller.CompanyCode,V.Local.sFilePath)
+
+F.Data.DataTable.CreateFromSQL("UPLSALES",conx,"Select CUSTOMER+SHIP_ID AS CID, ORDER_NO, LEFT(RECORD_NO,3) as RECORD_NO, RECORD_TYPE, CUSTOMER, SHIP_ID, '      ' AS FILLER1, LINE_TYPE, CONVERT(QTY_ORDERED, sql_char) AS QTY_ORDERED, CONVERT(QTY_SHIPPED, SQL_CHAR) AS QTY_SHIPPED, CONVERT(QTY_BO, SQL_CHAR) AS QTY_BO, CONVERT(WEIGHT, SQL_CHAR) AS WEIGHT, UM_ORDER, PART, CONVERT(PRICE, SQL_CHAR) AS PRICE, CONVERT(COST, SQL_CHAR) AS COST, DATE_SHIP, CODE_SORT, DESCRIPTION, USER_1, USER_2, USER_3, USER_4, USER_5, LOCATION, CONVERT(DISCOUNT, SQL_CHAR) AS DISCOUNT, FLAG_USE_MQD, CONVERT(PRICE_CLASS_DISC, SQL_CHAR) AS PRICE_CLASS_DISC, COMMISSION_TYPE, GL_ACCOUNT, TAX_STATE, TAX_1, TAX_2, TAX_3, TAX_4, TAX_5, TAX_6, TAX_7, TAX_8, TAX_9, TAX_10, TAX_APPLY_1, TAX_APPLY_2, TAX_APPLY_3, TAX_APPLY_4, TAX_APPLY_5, TAX_APPLY_6, TAX_APPLY_7, TAX_APPLY_8, TAX_APPLY_9, TAX_APPLY_10, ' ' AS QUOTE, CONVERT(QTY_ORIGINAL,SQL_CHAR) AS QTY_ORIGINAL, BIN, GROUP_LINES, DATE_ORDER, ITEM_PROMISE_DT, FLAG_TAX_STATUS, CUSTOMER_PART, INFO_1, INFO_2, ORDER_CURR_CD, CONVERT(EXTENSION, SQL_CHAR) AS EXTENSION, FLAG_BOM, BOM_PARENT, PRODUCT_LINE, ' ' AS FILLER3, CONVERT(PROD_LINE_DISC,SQL_CHAR) AS PROD_LINE_DISC, CONVERT(AMT_DISCOUNT, SQL_CHAR) AS AMT_DISCOUNT, CONVERT(DISCOUNT_PRICE, SQL_CHAR) AS DISCOUNT_PRICE, CONVERT(ORDER_DISC_AMT, SQL_CHAR) AS ORDER_DISC_AMT, CONVERT(PRCCLS_DISC_AMT, SQL_CHAR) AS PRCCLS_DISC_AMT, CONVERT(PRDLN_DISC_AMT, SQL_CHAR) AS PRDLN_DISC_AMT, '                ' AS FILLER4, CONVERT(PRICE_ORDER, SQL_CHAR) AS PRICE_ORDER, CONVERT(PRICE_DISC_ORD, SQL_CHAR) AS PRICE_DISC_ORD, '                ' AS FILLER5, CONVERT(EXTENSION_ORDER, SQL_CHAR) AS EXTENSION_ORDER, CONVERT(AMT_DISC_ORDER, SQL_CHAR) AS AMT_DISC_ORDER, CONVERT(AMT_DISC_ORD_ORDER, SQL_CHAR) AS AMT_DISC_ORD_ORDER, CONVERT(AMT_DISC_PR_CL_ORD, SQL_CHAR) AS AMT_DISC_PR_CL_ORD, CONVERT(AMT_DISC_PROD_LN_ORD, SQL_CHAR) AS AMT_DISC_PROD_LN_ORD, MUST_DLVR_BY_DATE, NO_DLVR_BEFORE_DATE From ORDER_LINES Where RECORD_TYPE = 'L' AND QTY_BO <> 0 AND LINE_TYPE <> 'F'")
+
+'Create Dictionary for TaxCode
+f.Data.Dictionary.CreateFromSQL("dic","conx","select cust, Tax_Zone from V_Customer_Tax_Auth union all select Customer+Ship_Seq, Ship_Tax_Zone_1 from V_OE_Multi_Ship",0)
+f.Data.Dictionary.SetDefaultReturn("dic","")
+f.Data.DataTable.FillFromDictionary("UPLSALES","dic","CID","Tax_State")
+F.Data.Dictionary.Close("dic")
+
+f.Data.Dictionary.CreateFromSQL("dic","conx","select cust, TAX_Auth from V_Customer_Tax_Auth union all select Customer+Ship_Seq,  Ship_Tax_1 from V_OE_Multi_Ship",0)
+f.Data.Dictionary.SetDefaultReturn("dic","")
+f.Data.DataTable.FillFromDictionary("UPLSALES","dic","CID","Tax_1")
+F.Data.Dictionary.Close("dic")
+
+'f.Data.Dictionary.CreateFromSQL("dic","conx","select ORDER_NUM+ORDER_LINE, 'Y' AS FLAG from V_ORDER_SS_ADDS",0)
+'f.Data.Dictionary.SetDefaultReturn("dic","N")
+'f.Data.DataTable.FillFromDictionary("UPLSALES","dic","OL","USE_SHIP_SCHD")
+'F.Data.DataTable.RemoveColumn("UPLSALES","OL")
+'F.Data.Dictionary.Close("dic")
+
+f.Data.Dictionary.CreateFromSQL("dic","conx","select ORDER_NO, QUOTE from V_ORDER_HEADER",0)
+f.Data.Dictionary.SetDefaultReturn("dic","")
+f.Data.DataTable.FillFromDictionary("UPLSALES","dic","ORDER_NO","QUOTE")
+F.Data.Dictionary.Close("dic")
+F.Data.DataTable.RemoveColumn("UPLSALES","CID")
+
+f.Intrinsic.String.Build("{0}\GAB_6934_SO_LINES_{1}.xml",v.Caller.GasDir, v.Caller.CompanyCode, v.Local.sFile)
+F.Data.DataTable.SaveToXML("UPLSALES",0,True,V.Local.sFile)
+F.Intrinsic.UI.ChangeWaitStatus("Uploading Sales Order")
+F.Intrinsic.Control.If(V.DataTable.UPLSALES.RowCount, >, 0)
+	Gui.Form.prgBar.Min(0)
+	Gui.Form.prgBar.Max(V.DataTable.UPLSALES.RowCount)
+	Gui.Form.lblTitle1.Caption("Preparing SO lines data...")
+	'Format values in each row as needed by file format
+	F.Intrinsic.Control.For(V.Local.iCount,0,V.DataTable.UPLSALES.RowCount--,1)
+		F.Intrinsic.String.Build("SO #{0}", V.DataTable.UPLSALES(V.Local.iCount).ORDER_NO!FieldVal, V.Local.sMsg)
+		Gui.Form.lblTitle2.Caption(V.Local.sMsg)
+		Gui.Form.prgBar.Value(V.Local.iCount)
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).ORDER_NO!FieldVal," ",7,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"ORDER_NO",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).RECORD_NO!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"RECORD_NO",V.Local.sRet)
+	
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).RECORD_TYPE!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"RECORD_TYPE",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).CUSTOMER!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"CUSTOMER",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).SHIP_ID!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"SHIP_ID",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).LINE_TYPE!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"LINE_TYPE",V.Local.sRet)
+		
+		F.Intrinsic.String.LPad(V.DataTable.UPLSALES(V.Local.iCount).QTY_ORDERED!FieldVal,"0",14,V.Local.sRet)
+		F.Intrinsic.String.RPad(V.Local.sRet," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"QTY_ORDERED",V.Local.sRet)
+		
+		F.Intrinsic.String.LPad(V.DataTable.UPLSALES(V.Local.iCount).QTY_SHIPPED!FieldVal,"0",14,V.Local.sRet)
+		F.Intrinsic.String.RPad(V.Local.sRet," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"QTY_SHIPPED",V.Local.sRet)
+		
+		F.Intrinsic.String.LPad(V.DataTable.UPLSALES(V.Local.iCount).QTY_BO!FieldVal,"0",14,V.Local.sRet)
+		F.Intrinsic.String.RPad(V.Local.sRet," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"QTY_BO",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).WEIGHT!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"WEIGHT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).UM_ORDER!FieldVal," ",2,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"UM_ORDER",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).PART!FieldVal," ",20,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"PART",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).PRICE!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"PRICE",V.Local.sRet)
+		
+		F.Intrinsic.String.LPad(V.DataTable.UPLSALES(V.Local.iCount).COST!FieldVal,"0",14,V.Local.sRet)
+		F.Intrinsic.String.RPad(V.Local.sRet," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"COST",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).DATE_SHIP!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"DATE_SHIP",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).CODE_SORT!FieldVal," ",12,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"CODE_SORT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).DESCRIPTION!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"DESCRIPTION",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).USER_1!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"USER_1",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).USER_2!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"USER_2",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).USER_3!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"USER_3",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).USER_4!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"USER_4",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).USER_5!FieldVal," ",30,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"USER_5",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).LOCATION!FieldVal," ",2,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"LOCATION",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).DISCOUNT!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"DISCOUNT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).FLAG_USE_MQD!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"FLAG_USE_MQD",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).PRICE_CLASS_DISC!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"PRICE_CLASS_DISC",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).COMMISSION_TYPE!FieldVal," ",5,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"COMMISSION_TYPE",V.Local.sRet)			
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).GL_ACCOUNT!FieldVal," ",15,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"GL_ACCOUNT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_STATE!FieldVal," ",2,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_STATE",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_1!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_1",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_2!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_2",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_3!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_3",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_4!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_4",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_5!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_5",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_6!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_6",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_7!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_7",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_8!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_8",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_9!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_9",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_10!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_10",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_1!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_1",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_2!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_2",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_3!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_3",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_4!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_4",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_5!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_5",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_6!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_6",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_7!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_7",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_8!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_8",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_9!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_9",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).TAX_APPLY_10!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"TAX_APPLY_10",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).QUOTE!FieldVal," ",4,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"QUOTE",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).QTY_ORIGINAL!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"QTY_ORIGINAL",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).BIN!FieldVal," ",4,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"BIN",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).GROUP_LINES!FieldVal," ",10,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"GROUP_LINES",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).DATE_ORDER!FieldVal," ",8,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"DATE_ORDER",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).ITEM_PROMISE_DT!FieldVal," ",6,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"ITEM_PROMISE_DT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).FLAG_TAX_STATUS!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"FLAG_TAX_STATUS",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).CUSTOMER_PART!FieldVal," ",32,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"CUSTOMER_PART",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).INFO_1!FieldVal," ",20,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"INFO_1",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).INFO_2!FieldVal," ",20,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"INFO_2",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).ORDER_CURR_CD!FieldVal," ",3,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"ORDER_CURR_CD",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).EXTENSION!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"EXTENSION",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).FLAG_BOM!FieldVal," ",1,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"FLAG_BOM",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).BOM_PARENT!FieldVal," ",4,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"BOM_PARENT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).PRODUCT_LINE!FieldVal," ",2,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"PRODUCT_LINE",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).PROD_LINE_DISC!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"PROD_LINE_DISC",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).AMT_DISCOUNT!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"AMT_DISCOUNT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).DISCOUNT_PRICE!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"DISCOUNT_PRICE",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).ORDER_DISC_AMT!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"ORDER_DISC_AMT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).PRCCLS_DISC_AMT!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"PRCCLS_DISC_AMT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).PRDLN_DISC_AMT!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"PRDLN_DISC_AMT",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).PRICE_ORDER!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"PRICE_ORDER",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).PRICE_DISC_ORD!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"PRICE_DISC_ORD",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).EXTENSION_ORDER!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"EXTENSION_ORDER",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).AMT_DISC_ORDER!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"AMT_DISC_ORDER",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).AMT_DISC_ORD_ORDER!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"AMT_DISC_ORD_ORDER",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).AMT_DISC_PR_CL_ORD!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"AMT_DISC_PR_CL_ORD",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).AMT_DISC_PROD_LN_ORD!FieldVal," ",16,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"AMT_DISC_PROD_LN_ORD",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).MUST_DLVR_BY_DATE!FieldVal," ",8,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"MUST_DLVR_BY_DATE",V.Local.sRet)
+		
+		F.Intrinsic.String.RPad(V.DataTable.UPLSALES(V.Local.iCount).NO_DLVR_BEFORE_DATE!FieldVal," ",8,V.Local.sRet)
+		F.Data.DataTable.SetValue("UPLSALES",V.Local.iCount,"NO_DLVR_BEFORE_DATE",V.Local.sRet)
+	F.Intrinsic.Control.Next(V.Local.iCount)
+	
+	F.Data.DataView.Create("UPLSALES","LRecordView",22)
+	F.Data.DataView.ToString("UPLSALES","LRecordView","",V.Ambient.NewLine,V.Local.sLRecords)
+	F.Data.DataView.Close("UPLSALES","LRecordView")
+	
+	F.Intrinsic.UI.CloseWaitDialog
+	
+	'Build the individual record-type strings to a single final string 
+	F.Intrinsic.Control.If(V.Local.sARecords,!=,"")
+		V.Local.sAllRecords.Set(V.Local.sARecords)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.If(V.Local.sBCRecords,!=,"")
+		F.Intrinsic.Control.If(V.Local.sAllRecords,=,"")
+			V.Local.sAllRecords.Set(V.Local.sBCRecords)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.String.Build("{0}{1}{2}",V.Local.sAllRecords,V.Ambient.NewLine,V.Local.sBCRecords,V.Local.sAllRecords)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.Control.If(V.Local.sLRecords,!=,"")
+		F.Intrinsic.Control.If(V.Local.sAllRecords,=,"")
+			V.Local.sAllRecords.Set(V.Local.sLRecords)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.String.Build("{0}{1}{2}",V.Local.sAllRecords,V.Ambient.NewLine,V.Local.sLRecords,V.Local.sAllRecords)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.EndIf
+		
+	'Verify at least one record exists, then write final string to file and call the necessary call wrapper
+	F.Intrinsic.Control.If(V.Local.sAllRecords,!=,"")
+		F.Intrinsic.File.String2File(V.Local.sFilePath,V.Local.sAllRecords, 1)
+		Gui.Form.prgBar.Min(0)
+		Gui.Form.prgBar.Max(100)
+		Gui.Form.lblTitle1.Caption("Updating SO Lines...")
+		Gui.Form.lblTitle2.Caption("")
+		F.ODBC.Connection!conx.Execute("Delete From Order_Lines Where Record_Type = 'L' AND QTY_BO <> 0 AND LINE_TYPE <> 'F'")
+		
+		F.Global.General.CallWrapperSync(50,"UPLSALES/A")
+		Gui.Form.prgBar.Value(100)
+
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Else
+	'Print some sort of error message	
+	F.Intrinsic.String.Build("SO Creation Error. Order lines in file do not appear to be parsed correctly.{1}", V.Ambient.NewLine, V.Local.sPOErr)
+	F.Intrinsic.UI.Msgbox(V.Local.sPOErr, "ERROR CREATING PO")
+	
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.UI.Msgbox("DONE!", "Mass Update Tax Code (6934)")
+F.ODBC.Connection!conx.Close
+F.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.UpdateSOLine.End
+
+Program.Sub.Comments.Start
+${$5$}$2.0.0.0$}$2
+${$6$}$dyunus$}$20230109141041368$}$xZ6SHi8g7O0Qsxe6AiO2NH3PnOKQRy0TA6+PducYN6ERzUTRKdI4cXkv8dUBgXova9d2nph7bx0=
+Program.Sub.Comments.End
